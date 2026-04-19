@@ -2,18 +2,25 @@
 """
 Парсер динамической страницы разметки
 Подключается к уже запущенному браузеру Thorium через CDP (порт 9222)
-Мониторит обновления страницы и сохраняет данные в markup_output.json
+Парсит страницу по нажатию клавиш и сохраняет данные в markup_output.json
 
 Требования:
 - Python 3.10+
 - playwright (установить: pip install playwright)
 - beautifulsoup4 (установить: pip install beautifulsoup4)
 - Thorium должен быть запущен с флагом --remote-debugging-port=9222
+
+Использование:
+- Запустите скрипт
+- Перейдите на страницу с таблицей в браузере
+- Нажмите любую клавишу в терминале для парсинга страницы
+- Нажмите 'q' + Enter для выхода
 """
 
 import json
 import re
-import time
+import sys
+import select
 from typing import Optional, Dict, Any
 
 from bs4 import BeautifulSoup
@@ -53,7 +60,6 @@ def parse_table(html_content: str) -> Optional[Dict[str, Any]]:
     # Ищем таблицу
     table = soup.find("table")
     if not table:
-        print("[WARNING] Таблица не найдена на странице")
         return None
     
     data: Dict[str, Any] = {}
@@ -118,7 +124,6 @@ def find_target_page(pages: list) -> Optional[Page]:
             # Проверяем заголовок и URL на наличие ключевых слов
             for keyword in target_keywords:
                 if keyword.lower() in title or keyword.lower() in url:
-                    print(f"[INFO] Найдена целевая страница: {page.title()}")
                     return page
         except Exception:
             # Если не удалось получить титул или URL, пропускаем
@@ -126,7 +131,6 @@ def find_target_page(pages: list) -> Optional[Page]:
     
     # Если не нашли по ключевым словам, возвращаем первую доступную страницу
     if pages:
-        print("[WARNING] Целевая страница не найдена по ключевым словам, используем первую доступную")
         return pages[0]
     
     return None
@@ -142,7 +146,23 @@ def save_to_json(data: Dict[str, Any], filepath: str = "markup_output.json") -> 
     """
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
-    print(f"[INFO] Данные сохранены в {filepath}")
+
+
+def wait_for_user_input() -> bool:
+    """
+    Проверка наличия ввода пользователя без блокировки.
+    
+    Returns:
+        True если пользователь ввел 'q' для выхода, иначе False
+    """
+    # Проверяем, есть ли ввод доступен
+    if sys.platform != 'win32':
+        ready, _, _ = select.select([sys.stdin], [], [], 0.1)
+        if ready:
+            user_input = sys.stdin.readline().strip().lower()
+            if user_input == 'q':
+                return True
+    return False
 
 
 def main():
@@ -152,9 +172,9 @@ def main():
     Алгоритм работы:
     1. Подключение к активной сессии Thorium через CDP
     2. Поиск целевой страницы с таблицей
-    3. Бесконечный цикл мониторинга обновлений
-    4. Парсинг таблицы при каждом обновлении
-    5. Запись результатов в JSON
+    3. Ожидание ввода пользователя для парсинга
+    4. Полная отрисовка страницы перед парсингом
+    5. Парсинг таблицы и сохранение в JSON
     """
     cdp_url = "http://localhost:9222"
     output_file = "markup_output.json"
@@ -163,10 +183,13 @@ def main():
     print("Парсер динамической страницы разметки")
     print("=" * 60)
     print(f"[INFO] Подключение к CDP: {cdp_url}")
-    print("[INFO] Ожидание подключения к браузеру Thorium...")
     print("[INFO] Убедитесь, что Thorium запущен с флагом --remote-debugging-port=9222")
-    print("[INFO] Авторизуйтесь на сайте и откройте страницу с таблицей")
     print("-" * 60)
+    print("Инструкция:")
+    print("  1. Авторизуйтесь на сайте и откройте страницу с таблицей")
+    print("  2. Нажмите Enter для парсинга текущей страницы")
+    print("  3. Введите 'q' и нажмите Enter для выхода")
+    print("=" * 60)
     
     playwright = None
     
@@ -196,68 +219,63 @@ def main():
                 return
             
             print(f"[INFO] Подключено к странице: {page.title()}")
-            print(f"[INFO] URL: {page.url}")
             print("-" * 60)
-            print("[INFO] Запуск мониторинга обновлений страницы...")
-            print("[INFO] Для остановки нажмите Ctrl+C")
-            print("=" * 60)
             
-            # Шаг 2: Бесконечный цикл мониторинга обновлений
+            # Шаг 2: Цикл ожидания ввода пользователя
             iteration = 0
             
             while True:
-                try:
-                    iteration += 1
-                    
-                    # Ждём загрузки страницы (триггер обновления)
-                    # networkidle означает, что сеть неактивна ~500мс
-                    print(f"\n[INFO] Итерация {iteration}: Ожидание загрузки страницы...")
-                    
-                    try:
-                        page.wait_for_load_state("networkidle", timeout=15000)
-                    except PlaywrightTimeoutError:
-                        print("[WARNING] Таймаут ожидания networkidle, продолжаем парсинг...")
-                    
-                    # Шаг 3: Получение и парсинг HTML
-                    print("[INFO] Получение содержимого страницы...")
-                    html_content = page.content()
-                    
-                    print("[INFO] Парсинг таблицы...")
-                    data = parse_table(html_content)
-                    
-                    if data:
-                        # Шаг 4: Запись данных в файл
-                        print(f"[INFO] Найдено полей: {len(data)}")
-                        save_to_json(data, output_file)
-                        
-                        # Вывод ключей для отладки
-                        print(f"[INFO] Ключи: {list(data.keys())[:10]}{'...' if len(data) > 10 else ''}")
-                    else:
-                        print("[WARNING] Нет данных для сохранения")
-                    
-                    # Ожидание следующего обновления
-                    # Можно добавить небольшую задержку, чтобы не нагружать систему
-                    time.sleep(1)
-                    
-                except PlaywrightTimeoutError as e:
-                    print(f"[WARNING] Timeout при парсинге: {e}")
-                    time.sleep(2)
-                    
-                except Exception as e:
-                    print(f"[ERROR] Ошибка при парсинге: {type(e).__name__}: {e}")
-                    time.sleep(2)
-                    
+                # Проверяем ввод пользователя
+                if wait_for_user_input():
+                    print("\n[INFO] Выход по команде пользователя")
+                    break
+                
+                # Проверяем, нужно ли парсить (нажатие Enter)
+                if sys.platform != 'win32':
+                    ready, _, _ = select.select([sys.stdin], [], [], 0)
+                    if ready:
+                        user_input = sys.stdin.readline().strip().lower()
+                        if user_input == 'q':
+                            break
+                        elif user_input == '':
+                            # Пользователь нажал Enter - парсим страницу
+                            iteration += 1
+                            
+                            # Шаг 3: Дожидаемся полной отрисовки страницы
+                            print(f"\n[INFO] Парсинг страницы (попытка {iteration})...")
+                            
+                            try:
+                                # Ждем полной загрузки и отрисовки
+                                page.wait_for_load_state("networkidle", timeout=15000)
+                            except PlaywrightTimeoutError:
+                                pass  # Продолжаем даже если таймаут
+                            
+                            # Дополнительная пауза для рендеринга JavaScript
+                            page.wait_for_timeout(2000)
+                            
+                            # Шаг 4: Получение и парсинг HTML
+                            html_content = page.content()
+                            data = parse_table(html_content)
+                            
+                            if data:
+                                # Шаг 5: Запись данных в файл
+                                save_to_json(data, output_file)
+                                print(f"[OK] Данные сохранены в {output_file}")
+                                print(f"[OK] Найдено полей: {len(data)}")
+                            else:
+                                print("[WARNING] Таблица не найдена или пуста")
+                
+                # Небольшая пауза чтобы не нагружать процессор
+                page.wait_for_timeout(100)
+                
     except KeyboardInterrupt:
-        print("\n" + "=" * 60)
-        print("[INFO] Парсер остановлен пользователем (Ctrl+C)")
-        print("=" * 60)
+        print("\n[INFO] Парсер остановлен пользователем (Ctrl+C)")
         
     except Exception as e:
         print(f"\n[ERROR] Критическая ошибка: {type(e).__name__}: {e}")
         print("[ERROR] Убедитесь, что Thorium запущен с портом отладки 9222")
         
     finally:
-        # Шаг 5: Корректное завершение работы
         print("[INFO] Завершение работы парсера...")
         if playwright:
             playwright.stop()
