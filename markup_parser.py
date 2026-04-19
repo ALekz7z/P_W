@@ -2,29 +2,31 @@
 """
 Парсер динамической страницы разметки
 Подключается к уже запущенному браузеру Thorium через CDP (порт 9222)
-Парсит страницу по нажатию клавиш и сохраняет данные в markup_output.json
+Парсит страницу по нажатию Shift + S и сохраняет данные в markup_output.json
 
 Требования:
 - Python 3.10+
 - playwright (установить: pip install playwright)
 - beautifulsoup4 (установить: pip install beautifulsoup4)
+- pynput (установить: pip install pynput)
 - Thorium должен быть запущен с флагом --remote-debugging-port=9222
 
 Использование:
 - Запустите скрипт
 - Перейдите на страницу с таблицей в браузере
-- Нажмите любую клавишу в терминале для парсинга страницы
-- Нажмите 'q' + Enter для выхода
+- Нажмите Shift + S для парсинга страницы
+- Нажмите Ctrl + C для выхода
 """
 
 import json
 import re
 import sys
-import select
+import threading
 from typing import Optional, Dict, Any
 
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright, Page, TimeoutError as PlaywrightTimeoutError
+from pynput import keyboard
 
 
 def clean_text(text: str) -> str:
@@ -148,21 +150,45 @@ def save_to_json(data: Dict[str, Any], filepath: str = "markup_output.json") -> 
         json.dump(data, f, ensure_ascii=False, indent=4)
 
 
-def wait_for_user_input() -> bool:
-    """
-    Проверка наличия ввода пользователя без блокировки.
+# Глобальная переменная для флага парсинга
+parse_triggered = False
+parse_lock = threading.Lock()
+shift_pressed = False
+
+
+def on_press(key):
+    """Обработчик нажатий клавиш."""
+    global parse_triggered, shift_pressed
     
-    Returns:
-        True если пользователь ввел 'q' для выхода, иначе False
-    """
-    # Проверяем, есть ли ввод доступен
-    if sys.platform != 'win32':
-        ready, _, _ = select.select([sys.stdin], [], [], 0.1)
-        if ready:
-            user_input = sys.stdin.readline().strip().lower()
-            if user_input == 'q':
-                return True
-    return False
+    try:
+        # Отслеживаем нажатие Shift
+        if key == keyboard.Key.shift or key == keyboard.Key.shift_l or key == keyboard.Key.shift_r:
+            shift_pressed = True
+        # Проверяем нажатие S при зажатом Shift
+        elif shift_pressed and hasattr(key, 'char') and key.char and key.char.lower() == 's':
+            with parse_lock:
+                if not parse_triggered:
+                    parse_triggered = True
+                    print("\n[INFO] Обнаружено нажатие Shift + S - запускаю парсинг...")
+    except Exception:
+        pass
+
+
+def on_release(key):
+    """Обработчик отпускания клавиш."""
+    global shift_pressed
+    
+    try:
+        if key == keyboard.Key.shift or key == keyboard.Key.shift_l or key == keyboard.Key.shift_r:
+            shift_pressed = False
+    except Exception:
+        pass
+
+
+def wait_for_shift_s():
+    """Запускает прослушивание клавиатуры в отдельном потоке."""
+    with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
+        listener.join()
 
 
 def main():
@@ -172,10 +198,12 @@ def main():
     Алгоритм работы:
     1. Подключение к активной сессии Thorium через CDP
     2. Поиск целевой страницы с таблицей
-    3. Ожидание ввода пользователя для парсинга
+    3. Ожидание нажатия Shift + S для парсинга
     4. Полная отрисовка страницы перед парсингом
     5. Парсинг таблицы и сохранение в JSON
     """
+    global parse_triggered
+    
     cdp_url = "http://localhost:9222"
     output_file = "markup_output.json"
     
@@ -187,8 +215,8 @@ def main():
     print("-" * 60)
     print("Инструкция:")
     print("  1. Авторизуйтесь на сайте и откройте страницу с таблицей")
-    print("  2. Нажмите Enter для парсинга текущей страницы")
-    print("  3. Введите 'q' и нажмите Enter для выхода")
+    print("  2. Нажмите Shift + S для парсинга текущей страницы")
+    print("  3. Нажмите Ctrl + C для выхода")
     print("=" * 60)
     
     playwright = None
@@ -220,50 +248,45 @@ def main():
             
             print(f"[INFO] Подключено к странице: {page.title()}")
             print("-" * 60)
+            print("[INFO] Ожидание нажатия Shift + S для парсинга...")
             
-            # Шаг 2: Цикл ожидания ввода пользователя
+            # Запускаем прослушивание клавиатуры в отдельном потоке
+            keyboard_thread = threading.Thread(target=wait_for_shift_s, daemon=True)
+            keyboard_thread.start()
+            
+            # Шаг 2: Цикл ожидания нажатия Shift + S
             iteration = 0
             
             while True:
-                # Проверяем ввод пользователя
-                if wait_for_user_input():
-                    print("\n[INFO] Выход по команде пользователя")
-                    break
-                
-                # Проверяем, нужно ли парсить (нажатие Enter)
-                if sys.platform != 'win32':
-                    ready, _, _ = select.select([sys.stdin], [], [], 0)
-                    if ready:
-                        user_input = sys.stdin.readline().strip().lower()
-                        if user_input == 'q':
-                            break
-                        elif user_input == '':
-                            # Пользователь нажал Enter - парсим страницу
-                            iteration += 1
-                            
-                            # Шаг 3: Дожидаемся полной отрисовки страницы
-                            print(f"\n[INFO] Парсинг страницы (попытка {iteration})...")
-                            
-                            try:
-                                # Ждем полной загрузки и отрисовки
-                                page.wait_for_load_state("networkidle", timeout=15000)
-                            except PlaywrightTimeoutError:
-                                pass  # Продолжаем даже если таймаут
-                            
-                            # Дополнительная пауза для рендеринга JavaScript
-                            page.wait_for_timeout(2000)
-                            
-                            # Шаг 4: Получение и парсинг HTML
-                            html_content = page.content()
-                            data = parse_table(html_content)
-                            
-                            if data:
-                                # Шаг 5: Запись данных в файл
-                                save_to_json(data, output_file)
-                                print(f"[OK] Данные сохранены в {output_file}")
-                                print(f"[OK] Найдено полей: {len(data)}")
-                            else:
-                                print("[WARNING] Таблица не найдена или пуста")
+                # Проверяем флаг парсинга
+                with parse_lock:
+                    if parse_triggered:
+                        parse_triggered = False
+                        iteration += 1
+                        
+                        # Шаг 3: Дожидаемся полной отрисовки страницы
+                        print(f"\n[INFO] Парсинг страницы (попытка {iteration})...")
+                        
+                        try:
+                            # Ждем полной загрузки и отрисовки
+                            page.wait_for_load_state("networkidle", timeout=15000)
+                        except PlaywrightTimeoutError:
+                            pass  # Продолжаем даже если таймаут
+                        
+                        # Дополнительная пауза для рендеринга JavaScript
+                        page.wait_for_timeout(2000)
+                        
+                        # Шаг 4: Получение и парсинг HTML
+                        html_content = page.content()
+                        data = parse_table(html_content)
+                        
+                        if data:
+                            # Шаг 5: Запись данных в файл
+                            save_to_json(data, output_file)
+                            print(f"[OK] Данные сохранены в {output_file}")
+                            print(f"[OK] Найдено полей: {len(data)}")
+                        else:
+                            print("[WARNING] Таблица не найдена или пуста")
                 
                 # Небольшая пауза чтобы не нагружать процессор
                 page.wait_for_timeout(100)
