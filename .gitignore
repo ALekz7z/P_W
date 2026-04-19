@@ -1,1 +1,1 @@
-Nothing needs to be added to .gitignore since only a Python source file (`markup_parser.py`) was added, which is a source code file that should be tracked in version control.
+Nothing should be ignored based on the provided file changes. The only modified file is `markup_parser.py`, which is a source code file and should not be added to .gitignore.
