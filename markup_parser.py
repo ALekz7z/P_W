@@ -232,7 +232,7 @@ def main():
     
     cdp_url = "http://localhost:9222"
     # Путь к папке для сохранения файлов
-    output_folder = r"C:\Users\gahar\.n8n\files"
+    output_folder = r"C:\Users\gahar\.n8n-files"
     output_file = os.path.join(output_folder, "markup_output.json")
     
     print("=" * 60)
