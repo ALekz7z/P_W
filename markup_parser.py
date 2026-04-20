@@ -188,15 +188,29 @@ def on_press(key):
     
     try:
         # Отслеживаем нажатие Shift
-        if key == keyboard.Key.shift or key == keyboard.Key.shift_l or key == keyboard.Key.shift_r:
+        if key in (keyboard.Key.shift, keyboard.Key.shift_l, keyboard.Key.shift_r):
             shift_pressed = True
-        # Проверяем нажатие S при зажатом Shift
-        elif shift_pressed and hasattr(key, 'char') and key.char and key.char.lower() == 's':
-            with parse_lock:
-                if not parse_triggered:
-                    parse_triggered = True
-                    print("\n[INFO] Обнаружено нажатие Shift + S - запускаю парсинг...")
-    except Exception:
+            return
+        
+        # Проверяем нажатие S (любой регистр) при зажатом Shift
+        if shift_pressed:
+            # Получаем символ клавиши
+            char = None
+            if hasattr(key, 'char') and key.char is not None:
+                char = key.char
+            elif hasattr(key, 'vk') and key.vk is not None:
+                # Для виртуальных кодов клавиш
+                if key.vk == 83:  # VK code for 'S'
+                    char = 's'
+            
+            if char and char.lower() == 's':
+                with parse_lock:
+                    if not parse_triggered:
+                        parse_triggered = True
+                        print("\n[INFO] Обнаружено нажатие Shift + S - запускаю парсинг...")
+    except Exception as e:
+        # Для отладки можно раскомментировать:
+        # print(f"[DEBUG] Ошибка в on_press: {e}, key={key}")
         pass
 
 
@@ -205,15 +219,19 @@ def on_release(key):
     global shift_pressed
     
     try:
-        if key == keyboard.Key.shift or key == keyboard.Key.shift_l or key == keyboard.Key.shift_r:
+        if key in (keyboard.Key.shift, keyboard.Key.shift_l, keyboard.Key.shift_r):
             shift_pressed = False
-    except Exception:
+    except Exception as e:
+        # Для отладки можно раскомментировать:
+        # print(f"[DEBUG] Ошибка в on_release: {e}, key={key}")
         pass
 
 
 def wait_for_shift_s():
     """Запускает прослушивание клавиатуры в отдельном потоке."""
+    print("[INFO] Слушатель клавиатуры запущен...")
     with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
+        print("[INFO] Слушатель клавиатуры активен. Нажмите Shift+S для парсинга.")
         listener.join()
 
 
