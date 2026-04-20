@@ -138,7 +138,7 @@ def find_target_page(pages: list) -> Optional[Page]:
     return None
 
 
-def save_to_json(data: Dict[str, Any], filepath: str = "markup_output.txt") -> None:
+def save_to_json(data: Dict[str, Any], filepath: str = r"C:\Users\gahar\.n8n-files\markup_output.json") -> None:
     """
     Сохранение данных в JSON-файл с перезаписью.
     
@@ -205,7 +205,7 @@ def main():
     global parse_triggered
     
     cdp_url = "http://localhost:9222"
-    output_file = "markup_output.txt"
+    output_file = r"C:\Users\gahar\.n8n-files\markup_output.json"
     
     print("=" * 60)
     print("Парсер динамической страницы разметки")
