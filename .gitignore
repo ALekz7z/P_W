@@ -1,1 +1,42 @@
-Nothing should be ignored based on the provided file changes. The only modified file is `markup_parser.py`, which is a source code file and should not be ignored.
+```
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+.ENV
+.env
+.env.*
+.venv.bak/
+.python-version
+
+# Generated files
+dist/
+build/
+*.egg-info/
+.coverage
+coverage/
+htmlcov/
+
+# Logs
+*.log
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
+.mypy_cache/
+```

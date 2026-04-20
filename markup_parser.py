@@ -138,16 +138,30 @@ def find_target_page(pages: list) -> Optional[Page]:
     return None
 
 
-def save_to_json(data: Dict[str, Any], filepath: str = r"C:\Users\gahar\.n8n-files\markup_output.json") -> None:
+def save_to_json(data: Dict[str, Any], filepath: str = r"C:\Users\gahar\.n8n-files\markup_output.json") -> bool:
     """
     Сохранение данных в JSON-файл с перезаписью.
     
     Args:
         data: Словарь с данными для сохранения
         filepath: Путь к файлу вывода
+    
+    Returns:
+        True если сохранение успешно, False иначе
     """
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
+    try:
+        import os
+        # Создаем директорию если она не существует
+        directory = os.path.dirname(filepath)
+        if directory and not os.path.exists(directory):
+            os.makedirs(directory, exist_ok=True)
+        
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+        return True
+    except Exception as e:
+        print(f"[ERROR] Не удалось сохранить файл {filepath}: {type(e).__name__}: {e}")
+        return False
 
 
 # Глобальная переменная для флага парсинга
@@ -282,9 +296,11 @@ def main():
                         
                         if data:
                             # Шаг 5: Запись данных в файл
-                            save_to_json(data, output_file)
-                            print(f"[OK] Данные сохранены в {output_file}")
-                            print(f"[OK] Найдено полей: {len(data)}")
+                            if save_to_json(data, output_file):
+                                print(f"[OK] Данные сохранены в {output_file}")
+                                print(f"[OK] Найдено полей: {len(data)}")
+                            else:
+                                print("[ERROR] Не удалось сохранить данные в файл")
                         else:
                             print("[WARNING] Таблица не найдена или пуста")
                 
