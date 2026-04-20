@@ -2,7 +2,7 @@
 """
 Парсер динамической страницы разметки
 Подключается к уже запущенному браузеру Thorium через CDP (порт 9222)
-Парсит страницу по нажатию Shift + S и сохраняет данные в markup_output.json
+Парсит страницу по нажатию Shift + S и сохраняет данные в C:\Users\gahar\.n8n\files\markup_output.json
 
 Требования:
 - Python 3.10+
@@ -16,12 +16,18 @@
 - Перейдите на страницу с таблицей в браузере
 - Нажмите Shift + S для парсинга страницы
 - Нажмите Ctrl + C для выхода
+
+Примечание:
+- Данные сохраняются в файл с обновлением существующих записей
+- При повторном парсинге новые данные объединяются со старыми
 """
 
 import json
+import os
 import re
 import sys
 import threading
+from pathlib import Path
 from typing import Optional, Dict, Any
 
 from bs4 import BeautifulSoup
@@ -140,14 +146,34 @@ def find_target_page(pages: list) -> Optional[Page]:
 
 def save_to_json(data: Dict[str, Any], filepath: str = "markup_output.json") -> None:
     """
-    Сохранение данных в JSON-файл с перезаписью.
+    Сохранение данных в JSON-файл с обновлением существующих данных.
+    Если файл существует, новые данные объединяются со старыми (новые перезаписывают старые при совпадении ключей).
     
     Args:
         data: Словарь с данными для сохранения
         filepath: Путь к файлу вывода
     """
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
+    # Создаем директорию, если она не существует
+    file_path = Path(filepath)
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    existing_data = {}
+    
+    # Читаем существующие данные, если файл есть
+    if file_path.exists():
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                existing_data = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            # Если файл поврежден или не читается, начинаем с пустого словаря
+            existing_data = {}
+    
+    # Объединяем данные: новые данные перезаписывают старые при совпадении ключей
+    merged_data = {**existing_data, **data}
+    
+    # Сохраняем объединенные данные
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(merged_data, f, ensure_ascii=False, indent=4)
 
 
 # Глобальная переменная для флага парсинга
@@ -200,17 +226,20 @@ def main():
     2. Поиск целевой страницы с таблицей
     3. Ожидание нажатия Shift + S для парсинга
     4. Полная отрисовка страницы перед парсингом
-    5. Парсинг таблицы и сохранение в JSON
+    5. Парсинг таблицы и сохранение в JSON (с обновлением существующих данных)
     """
     global parse_triggered
     
     cdp_url = "http://localhost:9222"
-    output_file = "markup_output.json"
+    # Путь к папке для сохранения файлов
+    output_folder = r"C:\Users\gahar\.n8n\files"
+    output_file = os.path.join(output_folder, "markup_output.json")
     
     print("=" * 60)
     print("Парсер динамической страницы разметки")
     print("=" * 60)
     print(f"[INFO] Подключение к CDP: {cdp_url}")
+    print(f"[INFO] Путь сохранения: {output_file}")
     print("[INFO] Убедитесь, что Thorium запущен с флагом --remote-debugging-port=9222")
     print("-" * 60)
     print("Инструкция:")
