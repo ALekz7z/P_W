@@ -59,6 +59,119 @@ def clean_text(text: str) -> str:
     return result
 
 
+def adapt_for_neural_network(data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Адаптация распарсенных данных для нейросети.
+    
+    Выполняет:
+    - Удаление маркетингового мусора и воды из текста
+    - Нормализацию булевых значений (Нет/Да → false/true)
+    - Удаление дублей и служебных полей
+    - Очистку описания от рекламных клише
+    - Структурирование данных для оптимальной работы LLM
+    
+    Args:
+        data: Словарь с распарсенными данными
+        
+    Returns:
+        Очищенный и структурированный словарь
+    """
+    logger.info("[ADAPT_FOR_NN] Начало адаптации данных для нейросети")
+    logger.debug(f"[ADAPT_FOR_NN] Входные данные: {len(data)} полей")
+    
+    if not data:
+        logger.warning("[ADAPT_FOR_NN] Пустые входные данные")
+        return {}
+    
+    # Поля которые точно нужны нейросети
+    essential_fields = {
+        "Товар", "Название", "Описание", "Бренд", "id бренда",
+        "Совместимость", "Страна производства", "Цвет",
+        "Комплектация", "Цена", "Артикул", "Категория"
+    }
+    
+    # Маркетинговые фразы-клише для удаления
+    marketing_phrases = [
+        r"это новинка на рынке[^.]*\.?",
+        r"Мы предоставляем непревзойденную защиту[^.]*\.?",
+        r"Приведите свой мобильный телефон в идеальное состояние\.?",
+        r"Благодарим за Ваш выбор и оказанное доверие к нам!?[.!]*",
+        r"ВНИМАНИЕ!.*?чтобы не допустить ошибок[^.]*\.?",
+        r"сделана из высококачественного[^.]*\.?",
+        r"удивительно гибкая, тонкая[^.]*\.?",
+        r"способна выдерживать давление и удары\.?",
+        r"легко наносится на корпус телефона[^.]*\.?",
+        r"предлагает полную защиту телефона[^.]*\.?",
+        r"В карточке товара вы можете посмотреть[^.]*\.?",
+        r"чтобы сделать правильный выбор[^.]*\.?",
+        r"Установка пленки – процесс простой и удобный[^.]*\.?",
+        r"она остается незаметной[^.]*\.?",
+        r"имеет сверкающий и блистающий эффект[^.]*\.?",
+    ]
+    
+    cleaned_data = {}
+    
+    for key, value in data.items():
+        # Пропускаем технические поля
+        if key in ["Дата обновления", "Удалено", "Количество изображений", "Есть видео", "Скидка", "18+"]:
+            logger.debug(f"[ADAPT_FOR_NN] Пропущено техническое поле: {key}")
+            continue
+        
+        # Пропускаем поля-дубликаты или мусор (но оставляем обязательные)
+        if key == value or not value:
+            if key not in essential_fields:
+                logger.debug(f"[ADAPT_FOR_NN] Пропущено поле-дубль или пустое: {key}")
+                continue
+        
+        # Нормализация булевых значений
+        if isinstance(value, str):
+            if value.lower() == "нет":
+                value = None
+            elif value.lower() == "да":
+                value = True
+        
+        # Очистка описания от маркетингового мусора
+        if key == "Описание" and isinstance(value, str):
+            cleaned_value = value
+            for pattern in marketing_phrases:
+                cleaned_value = re.sub(pattern, "", cleaned_value, flags=re.IGNORECASE)
+            # Удаляем лишние пробелы после очистки
+            cleaned_value = " ".join(cleaned_value.split())
+            value = cleaned_value
+            logger.debug(f"[ADAPT_FOR_NN] Описание очищено от маркетинговых фраз")
+        
+        # Очистка ключа от артефактов
+        clean_key = clean_text(key)
+        
+        # Если ключ содержит несколько полей через тире, разбиваем
+        if " - " in clean_key and clean_key.count(" - ") > 2:
+            logger.debug(f"[ADAPT_FOR_NN] Ключ содержит артефакты, используем первую часть: {clean_key}")
+            clean_key = clean_key.split(" - ")[0].strip()
+        
+        cleaned_data[clean_key] = value
+        logger.debug(f"[ADAPT_FOR_NN] Добавлено поле: '{clean_key}'")
+    
+    # Отдельно обрабатываем поле "Товар" - убираем дату и время
+    if "Товар" in cleaned_data:
+        товар_value = cleaned_data["Товар"]
+        if isinstance(товар_value, str):
+            товар_value = re.sub(r"\s*\d{1,2}\s+[а-яА-Я]+\.\s+\d{4}\s+г\.,\s+\d{1,2}:\d{2}", "", товар_value)
+            cleaned_data["Товар"] = товар_value.strip()
+            logger.debug(f"[ADAPT_FOR_NN] Поле 'Товар' очищено от даты: {cleaned_data['Товар']}")
+    
+    # Отдельно обрабатываем "Поисковый запрос" - убираем мусор
+    if "Поисковый запрос" in cleaned_data:
+        запрос_value = cleaned_data["Поисковый запрос"]
+        if isinstance(запрос_value, str):
+            запрос_value = re.sub(r"\s*\|\|\s*", " ", запрос_value)
+            запрос_value = re.sub(r"\s*\(\d+\)\s*", "", запрос_value)
+            cleaned_data["Поисковый запрос"] = " ".join(запрос_value.split()).strip()
+            logger.debug(f"[ADAPT_FOR_NN] Поисковый запрос очищен: {cleaned_data['Поисковый запрос']}")
+    
+    logger.info(f"[ADAPT_FOR_NN] Адаптация завершена. Осталось полей: {len(cleaned_data)}")
+    return cleaned_data
+
+
 def parse_table(html_content: str) -> Optional[Dict[str, Any]]:
     """
     Парсинг HTML-таблицы с разметкой.
@@ -375,13 +488,17 @@ def main():
                         data = parse_table(html_content)
                         
                         if data:
+                            # Шаг 5.1: Адаптация данных для нейросети
+                            logger.info("[MAIN] Шаг 5.1: Адаптация данных для нейросети...")
+                            adapted_data = adapt_for_neural_network(data)
+                            
                             # Шаг 6: Запись данных в файл
                             logger.info("[MAIN] Шаг 6: Сохранение данных в JSON файл...")
-                            if save_to_json(data, output_file):
+                            if save_to_json(adapted_data, output_file):
                                 logger.info(f"[MAIN] Данные успешно сохранены в {output_file}")
-                                logger.info(f"[MAIN] Найдено полей: {len(data)}")
+                                logger.info(f"[MAIN] Найдено полей: {len(adapted_data)} (было: {len(data)})")
                                 print(f"[OK] Данные сохранены в {output_file}")
-                                print(f"[OK] Найдено полей: {len(data)}")
+                                print(f"[OK] Найдено полей: {len(adapted_data)} (было: {len(data)})")
                             else:
                                 logger.error("[MAIN] Не удалось сохранить данные в файл")
                                 print("[ERROR] Не удалось сохранить данные в файл")
